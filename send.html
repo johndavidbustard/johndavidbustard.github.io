@@ -3,15 +3,16 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width">
-        <title>Peer-to-Peer Cue System --- Sender</title>
-        <link rel="stylesheet" href="style.css">
+        <title>Peer-to-Peer File Browser</title>
+        <!--<link rel="stylesheet" href="style.css">-->
     </head>
     <body>
-        <h1>Peer-to-Peer Cue System --- Sender</h1>
-
         <table class="control">
             <tr>
-                <img id="testImage" width="128" height="128">
+                <img id="testImage" style="max-height:512px;max-width:512px;height:auto;width:auto;">
+            </tr>
+            <tr>
+                <div id="testDirectory"></div>
             </tr>
             <tr>
                 <td class="title">Status:</td>
@@ -24,7 +25,7 @@
                     <button id="connect-button">Connect</button>
                 </td>
                 <td>
-                    <input type="text" id="sendMessageBox" autofocus="true" value='{"url":"test.jpg"}'/>
+                    <input type="text" id="sendMessageBox" autofocus="true" value='{"url":""}'/>
                     <button type="button" id="sendButton">Send</button>
                     <button type="button" id="clearMsgsButton">Clear Msgs (Local)</button>
                 </td>
@@ -33,6 +34,7 @@
                 <td><div id="status" class="status"></div></td>
                 <td><div class="message" id="message"></div></td>
             </tr>
+			<!--
             <tr>
                 <td>
                     <button type="button" class="control-button" id="resetButton">Reset</button>
@@ -49,6 +51,7 @@
                     <button type="button" class="control-button" id="offButton">Off</button>
                 </td>
             </tr>
+			-->
         </table>
 
         <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
@@ -58,13 +61,14 @@
                 var lastPeerId = null;
                 var peer = null; // own peer object
                 var conn = null;
+				var loggedin = false;
                 var recvIdInput = document.getElementById("receiver-id");
                 var status = document.getElementById("status");
                 var message = document.getElementById("message");
-                var goButton = document.getElementById("goButton");
-                var resetButton = document.getElementById("resetButton");
-                var fadeButton = document.getElementById("fadeButton");
-                var offButton = document.getElementById("offButton");
+                //var goButton = document.getElementById("goButton");
+                //var resetButton = document.getElementById("resetButton");
+                //var fadeButton = document.getElementById("fadeButton");
+                //var offButton = document.getElementById("offButton");
                 var sendMessageBox = document.getElementById("sendMessageBox");
                 var sendButton = document.getElementById("sendButton");
                 var clearMsgsButton = document.getElementById("clearMsgsButton");
@@ -72,7 +76,44 @@
                 var cueString = "<span class=\"cueMsg\">Cue: </span>";
 
 				var testImage = document.getElementById("testImage");
+				var dirDiv = document.getElementById("testDirectory");
+				
+				window.signaller = {};
+				signaller.signalUrl = function (sigName) {
 
+                /**
+                 * Send a signal via the peer connection and add it to the log.
+                 * This will only occur if the connection is still alive.
+                 */
+                 //function signalUrl(sigName) {
+                    if (conn && conn.open) {
+                        conn.send('{\"url\":\"'+sigName+'\"}');
+                        console.log(sigName + " signal sent");
+                        addMessage(cueString + sigName);
+                    } else {
+                        console.log('Connection is closed');
+                    }
+                };
+                 function signal(sigName) {
+                    if (conn && conn.open) {
+                        conn.send(sigName);
+                        console.log(sigName + " signal sent");
+                        addMessage(cueString + sigName);
+                    } else {
+                        console.log('Connection is closed');
+                    }
+                };
+                function login() 
+				{
+					var username = "johndavidbustard";
+					var password = "helloworld";
+					var asJSON = '{"username":"'+username+'","password":"'+password+'"}';
+                    if (conn && conn.open) {
+                        conn.send(asJSON);
+                    } else {
+                        console.log('Connection is closed');
+                    }
+                };
                 /**
                  * Create the Peer object for our end of the connection.
                  *
@@ -93,7 +134,6 @@
                         } else {
                             lastPeerId = peer.id;
                         }
-
                         console.log('ID: ' + peer.id);
                     });
                     peer.on('connection', function (c) {
@@ -166,6 +206,8 @@
                         conn.close();
                     }
 
+					loggedin = false;
+
                     // Create connection to destination peer specified in the input field
                     conn = peer.connect(recvIdInput.value, {
                         reliable: true
@@ -176,15 +218,45 @@
                         console.log("Connected to: " + conn.peer);
 
                         // Check URL params for comamnds that should be sent immediately
-                        var command = getUrlParam("command");
-                        if (command)
-                            conn.send(command);
+                        //var command = getUrlParam("command");
+                        //if (command)
+                        //    conn.send(command);
+						login();
                     });
                     // Handle incoming data (messages only since this is the signal sender)
                     conn.on('data', function (data) {
 						if (typeof data === 'string')
 						{
-							addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
+							if(data.startsWith("{"))
+							{
+								var asJSON = JSON.parse(data);
+								if(asJSON.files!=null)
+								{
+									var directoryHTML = "";
+									directoryHTML += '<button onClick="signaller.signalUrl(\'' + asJSON.parent + '\'); return false;"/>'+asJSON.parent+'</button>'+asJSON.name+'<br>\n';
+									directoryHTML += "<h1>Directories:</h1>\n";
+									for(let i in asJSON.dirs)
+									{
+										var f = asJSON.dirs[i];
+										directoryHTML += '<button onClick="signaller.signalUrl(\'' + f.path + '\'); return false;"/>'+f.name+'</button><br>\n';
+									}
+									directoryHTML += "<h1>Files:</h1>\n";
+									for(let i in asJSON.files)
+									{
+										var f = asJSON.files[i];
+										directoryHTML += '<button onClick="signaller.signalUrl(\'' + f.path + '\'); return false;"/>'+f.name+'</button><br>\n';
+									}
+									dirDiv.innerHTML = directoryHTML;
+								}
+								else
+								{
+									addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
+								}
+							}
+							else
+							{
+								addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
+							}
 						}
 						else
 						{
@@ -223,20 +295,7 @@
                         return results[1];
                 };
 
-                /**
-                 * Send a signal via the peer connection and add it to the log.
-                 * This will only occur if the connection is still alive.
-                 */
-                 function signal(sigName) {
-                    if (conn && conn.open) {
-                        conn.send(sigName);
-                        console.log(sigName + " signal sent");
-                        addMessage(cueString + sigName);
-                    } else {
-                        console.log('Connection is closed');
-                    }
-                }
-
+				/*
                 goButton.addEventListener('click', function () {
                     signal("Go");
                 });
@@ -249,7 +308,7 @@
                 offButton.addEventListener('click', function () {
                     signal("Off");
                 });
-
+				*/
                 function addMessage(msg) {
                     var now = new Date();
                     var h = now.getHours();
