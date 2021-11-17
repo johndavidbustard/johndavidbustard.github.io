@@ -12,6 +12,12 @@
                 <img id="testImage" style="max-height:512px;max-width:512px;height:auto;width:auto;">
             </tr>
             <tr>
+                <div id="testCollection"></div>
+            </tr>
+            <tr>
+                <div id="testCollections"></div>
+            </tr>
+            <tr>
                 <div id="testImageDiv"></div>
             </tr>
             <tr>
@@ -28,7 +34,7 @@
                     <button id="connect-button">Connect</button>
                 </td>
                 <td>
-                    <input type="text" id="sendMessageBox" autofocus="true" value='{"url":""}'/>
+                    <input type="text" id="sendMessageBox" autofocus="true" value='{"url":"/mongodb/collections"}'/>
                     <input type="text" id="sendPath" value=''/>
                     <input type="text" id="sendPostData" value=''/>
                     <button type="button" id="sendButton">Send</button>
@@ -86,9 +92,78 @@
 				var testImage = document.getElementById("testImage");
 				var testImageDiv = document.getElementById("testImageDiv");
 				var dirDiv = document.getElementById("testDirectory");
+
+				var collectionDiv = document.getElementById("testCollection");
+				var collectionsDiv = document.getElementById("testCollections");
 				
+				var lookupCache = {};				
+				
+				function escapeHtml(unsafe)
+				{
+					if(typeof unsafe == "number")
+					{
+						return ""+unsafe;
+					}
+					else
+					if(typeof unsafe == "string")
+					{
+						return unsafe
+							 .replace(/&/g, "&amp;")
+							 .replace(/</g, "&lt;")
+							 .replace(/>/g, "&gt;")
+							 .replace(/"/g, "&quot;")
+							 .replace(/'/g, "&#039;");
+					}
+					else
+					if(Array.isArray(unsafe))
+					{
+						let result = "";
+						result += "<table>";
+						for(let i in unsafe)
+						{
+							result += "<tr>";
+							let v = unsafe[i];
+							result += "<td>";
+							result += escapeHtml(v);							
+							result += "</td>";
+							result += "</tr>";
+						}
+						result += "</table>";
+						return result;
+					}
+					else
+					{
+						return JSON.stringify(unsafe);
+					}
+				}
 				function utf8_to_b64( str ) {
 				  return window.btoa(unescape(encodeURIComponent( str )));
+				}
+				function getKeys(tableData) {
+					if(tableData==null)
+					{
+						return null;
+					}
+					else
+					{
+						let keys = Object.keys(tableData.variables);
+						return keys;
+					}
+				}
+				function decodeUsingMetadata(v,variableData)
+				{
+					if((variableData!=null)&&(variableData.values!=null))
+					{
+						for(let i in variableData.values)
+						{
+							let vv = variableData.values[i];
+							if((v)===(vv.Value))
+							{
+								return vv.Label;
+							}
+						}
+					}					
+					return v;
 				}
 
 				const encode = input => {
@@ -120,28 +195,52 @@
 				};
 
 				window.signaller = {};
-				signaller.signalUrl = function (sigName,ext=null,mime=null) {
 
-                /**
-                 * Send a signal via the peer connection and add it to the log.
-                 * This will only occur if the connection is still alive.
-                 */
-                 //function signalUrl(sigName) {
-                    if (conn && conn.open) {
+				signaller.signalUrl = function (sigName,
+												ext=null,
+												mime=null,
+												postData=null,
+												postProcess=null,
+												extra=null) 
+				{
+					let toSend = {"url":sigName,"requestTime":Date.now()};
+					//postData = postData.replace()
+					/**
+					 * Send a signal via the peer connection and add it to the log.
+					 * This will only occur if the connection is still alive.
+					 */
+					 //function signalUrl(sigName) {
+					if (conn && conn.open) 
+					{
+						if(postData!=null)
+						{
+							toSend.postData = postData;
+						}
+						else
 						if(ext!=null)
 						{
-							conn.send('{\"url\":\"'+sigName+'\",\"requestTime\":\"'+Date.now()+'\",\"requestTime\":\"'+Date.now()+'\",\"ext\":\"'+ext+'\",\"mime\":\"'+mime+'\"}');
+							toSend.ext = ext;
+							toSend.mime = mime;
 						}
 						else
 						{
-							conn.send('{\"url\":\"'+sigName+'\",\"requestTime\":\"'+Date.now()+'\",\"requestTime\":\"'+Date.now()+'\"}');
 						}
-                        console.log(sigName + " signal sent");
-                        addMessage(cueString + sigName);
-                    } else {
-                        console.log('Connection is closed');
-                    }
+						if(postProcess!=null)
+						{
+							toSend.postProcess = postProcess;
+						}
+						if(extra!=null)
+						{
+							toSend.extra = extra;
+						}
+						conn.send(toSend);
+						console.log(sigName + " signal sent");
+						addMessage(cueString + sigName);
+					} else {
+						console.log('Connection is closed');
+					}
                 };
+				
                  function signal(sigName) {
                     if (conn && conn.open) {
                         conn.send(sigName);
@@ -151,11 +250,163 @@
                         console.log('Connection is closed');
                     }
                 };
+				
+				function setElementFromCollectionEntry(collectionName,entryId,variableId,elemid,setFunction="setInnerHTMLOfElement")
+				{
+					var collectionRequest = "/mongodb/meta/interpret/"+collectionName+"";
+					let accessor = ("data.json.entries[0]."+variableId);
+					if(variableId==null)
+					{
+						accessor = "data.json.entries[0]";
+					}
+					signaller.signalUrl(collectionRequest,null,null,{"_id":entryId},setFunction,{"elemid":elemid,"access":accessor});
+				}				
+				
+				function setValueOfElement(data)
+				{
+					let elem = document.getElementById(data.request.extra.elemid);
+					let v = eval(data.request.extra.access);
+					elem.value = escapeHtml(v);
+				}
+				function setInnerTextOfElement(data)
+				{
+					let elem = document.getElementById(data.request.extra.elemid);
+					let v = eval(data.request.extra.access);
+					if(typeof v!="string")
+					{
+						v = JSON.stringify(v);
+					}
+					elem.innerText = escapeHtml(v);
+				}
+				function setInnerHTMLOfElement(data)
+				{
+					if((data.json!=null)&&(data.json.entries!=null)&&(data.json.entries.length>0))
+					{
+						let elem = document.getElementById(data.request.extra.elemid);
+						let v = eval(data.request.extra.access);
+
+						let meta = data.json.meta;
+						let tableData = null;
+						if((meta!=null)&&(meta.metadata[0]!=null)&&(meta.metadata[0].numberOfEntries!=null))
+						{
+							tableData = meta.metadata[0];
+							let knownAs = tableData.knownAs[0];
+							//Use the first entry to parse examples
+							let collectionHTML = getHTMLFor(knownAs,v,data.request.extra.elemid,tableData);
+							elem.innerHTML = collectionHTML;//escapeHtml(v);
+						}
+						else
+						{
+							console.log("Setting "+v+" into "+data.request.extra.elemid);
+							elem.innerHTML = escapeHtml(v);
+						}
+					}
+					else
+					{
+						console.log("Setting nothing into "+data.request.extra.elemid);
+					}
+				}
+				
+				function getHTMLFor(isA,thisEntry,isAi,tableData)
+				{
+					let collectionHTML = "";
+					let isAKeys = Object.keys(isA);
+					for(let ik in isAKeys)
+					{
+						let iv = isA[isAKeys[ik]];
+						if(Array.isArray(iv))
+						{
+							collectionHTML += " "+isAKeys[ik]+":[";
+							for(let ivi in iv)
+							{
+								let iiv = iv[ivi];
+								let spanid = "entryProperty"+isAi+"_"+ik+"_"+ivi;
+								if(ivi>0)
+								{
+									collectionHTML += ",";
+								}
+								if(typeof iiv === "string")
+								{
+									if(isAKeys[ik]==="this")
+									{
+										let v = thisEntry[iiv];
+										if(tableData!=null)
+										{
+											v = decodeUsingMetadata(v,tableData.variables[iiv]);
+										}
+										//iv is the index of the collection specified by the key
+										collectionHTML += "<span id=\""+spanid+"\">"+v+"</span>"
+									}
+									else
+									{
+										//iiv is the index of the collection specified by the key
+										//setElementFromCollectionEntry(isAKeys[ik],iiv,null,spanid);
+										setElementFromCollectionEntry(isAKeys[ik],iiv,null,spanid);
+										collectionHTML += "<span id=\""+spanid+"\"></span>"
+									}
+								}
+								else
+								{
+									//This entry is an object specifying how to get the value from the table for the entry
+									if(iiv.this!=null)
+									{									
+										let v = thisEntry[iiv.this];
+										if(tableData!=null)
+										{
+											v = decodeUsingMetadata(v,tableData.variables[iiv.this]);
+										}
+										collectionHTML += "<span id=\""+spanid+"\">"+v+"</span>"
+									}
+								}
+							}
+							collectionHTML += "]";
+						}
+						else
+						{
+							let spanid = "entryProperty"+isAi+"_"+ik;
+							//setElementFromCollectionEntry(isAKeys[ik],iv,"_id",spanid);
+							if(typeof iv === "string")
+							{
+								if(isAKeys[ik]==="this")
+								{
+									let v = thisEntry[iv];
+									if(tableData!=null)
+									{
+										v = decodeUsingMetadata(v,tableData.variables[iv]);
+									}
+									//iv is the index of the collection specified by the key
+									collectionHTML += " "+isAKeys[ik]+":<span id=\""+spanid+"\">"+v+"</span>"
+								}
+								else
+								{
+									//iv is the index of the collection specified by the key
+									setElementFromCollectionEntry(isAKeys[ik],iv,null,spanid);
+									collectionHTML += " "+isAKeys[ik]+":<span id=\""+spanid+"\"></span>"
+								}
+							}
+							else
+							{
+								//This entry is an object specifying how to get the value from the table for the entry
+								if(iv.this!=null)
+								{									
+									let v = thisEntry[iv.this];
+									if(tableData!=null)
+									{
+										v = decodeUsingMetadata(v,tableData.variables[iv.this]);
+									}
+									collectionHTML += " "+isAKeys[ik]+":<span id=\""+spanid+"\">"+v+"</span>"
+								}
+							}
+						}
+					}
+					return collectionHTML;
+				}
+				
                 function login() 
 				{
 					var username = "johndavidbustard";
-					var password = "helloworld";
-					var asJSON = '{"username":"'+username+'","password":"'+password+'"}';
+					var password = "goodbyeworld";
+					var asJSON = {"username":username,"password":password};
                     if (conn && conn.open) {
                         conn.send(asJSON);
                     } else {
@@ -278,6 +529,24 @@
 							if(data.startsWith("{"))
 							{
 								var asJSON = JSON.parse(data);
+							}
+							else
+							{
+								addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
+							}
+						}
+						else
+						{
+							addMessage("<span class=\"peerMsg\">Peer:</span> Got response that isn't a string");
+
+							if(data.request.postProcess!=null)
+							{
+								eval(data.request.postProcess+"(data);");
+							}							
+							else
+							if(data.json!=null)
+							{
+								let asJSON = data.json;
 								if(asJSON.files!=null)
 								{
 									var directoryHTML = "";
@@ -304,62 +573,188 @@
 									dirDiv.innerHTML = directoryHTML;
 								}
 								else
+								if(data.request.url=="/mongodb/collections")
 								{
-									addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
+									var collectionsHTML = "";
+									collectionsHTML += "<h1>Collections:</h1>\n";
+									for(let i in asJSON)
+									{
+										var f = asJSON[i];
+										var collectionRequest = "/mongodb/meta/interpret/"+f.name+"";
+										collectionsHTML += '<button onClick="signaller.signalUrl(\'' + collectionRequest + '\',null,null,{offset:0,range:10}); return false;"/>'+f.name+'</button><br>\n';
+									}
+									collectionsDiv.innerHTML = collectionsHTML;
+								}
+								else
+								if(data.request.url.startsWith("/mongodb/meta/find/"))
+								{
+									collectionDiv.innerHTML = JSON.stringify(data);									
+								}
+								else
+								///mongodb/meta/interpret/
+								if(data.request.url.startsWith("/mongodb/meta/interpret/"))
+								{
+									var collectionName = data.request.url.substring("/mongodb/meta/interpret/".length);
+									var collectionHTML = "";
+
+									collectionHTML += "<h1>"+collectionName+"</h1>";
+
+									let meta = asJSON.meta;
+									let entries = asJSON.entries;
+
+									let tableData = null;
+									if((meta!=null)&&(meta.metadata[0]!=null)&&(meta.metadata[0].numberOfEntries!=null))
+									{
+										tableData = meta.metadata[0];
+									}
+
+									let keys = getKeys(tableData);
+									if(keys==null)
+									{
+										let e = entries[0];
+										keys = Object.keys(e);
+									}
+									
+									collectionHTML += "<table border='1' style='border-collapse:collapse'>";
+									
+									collectionHTML += "<tr>";
+									for(let ki in keys)
+									{
+										collectionHTML += "<th>";
+										let k = keys[ki];
+										if(tableData!=null)
+										{
+											k = tableData.variables[k].label+" ("+k+")";
+										}
+										collectionHTML += escapeHtml(k);
+										collectionHTML += "</th>";
+									}										
+									collectionHTML += "</tr>";
+
+									for(let i in entries)
+									{
+										collectionHTML += "<tr>";
+										let e = entries[i];
+										
+										for(let ki in keys)
+										{
+											//collectionHTML += "<td>";
+											let k = keys[ki];
+											//collectionHTML += escapeHtml(k);
+											//collectionHTML += "</td>";
+											collectionHTML += "<td>";
+											let v = e[k];
+											if(tableData!=null)
+											{
+												v = decodeUsingMetadata(v,tableData.variables[k]);
+											}
+											collectionHTML += escapeHtml(v);
+											collectionHTML += "</td>";
+										}										
+										collectionHTML += "</tr>";										
+									}
+									collectionHTML += "</table>";
+									if(tableData!=null)
+									{
+										console.log("NEW tableData");
+										collectionHTML += "<br>Number of entries:"+tableData.numberOfEntries+"\n";
+										
+										//Go through metadata about an entry and fill in with callback
+										collectionHTML += "<br>Entry isA:\n";
+										if(tableData.isA!=null)
+										{
+											for(let isAi in tableData.isA)
+											{
+												let isA = tableData.isA[isAi];
+												//Use the first entry to parse examples
+												collectionHTML += getHTMLFor(isA,entries[0],"isA_"+isAi,tableData);
+											}
+										}
+										collectionHTML += "<br>Entry withProperties:\n";
+										if(tableData.withProperties!=null)
+										{
+											for(let isAi in tableData.withProperties)
+											{
+												let isA = tableData.withProperties[isAi];
+												//Use the first entry to parse examples
+												collectionHTML += getHTMLFor(isA,entries[0],"withProperties_"+isAi,tableData);
+											}
+										}
+										collectionHTML += "<br>Entry knownAs:\n";
+										if(tableData.knownAs!=null)
+										{
+											for(let isAi in tableData.knownAs)
+											{
+												let isA = tableData.knownAs[isAi];
+												//Use the first entry to parse examples
+												collectionHTML += getHTMLFor(isA,entries[0],"knownAs_"+isAi,tableData);
+											}
+										}
+										collectionHTML += "<br>Entry describedAs:\n";
+										if(tableData.describedAs!=null)
+										{
+											for(let isAi in tableData.describedAs)
+											{
+												let isA = tableData.describedAs[isAi];
+												//Use the first entry to parse examples
+												collectionHTML += getHTMLFor(isA,entries[0],"describedAs_"+isAi,tableData);
+											}
+										}
+										//setElementFromCollectionEntry(collectionName,entryId,variableId,elemid);
+									}
+									collectionDiv.innerHTML = collectionHTML;									
+								}
+								else
+								{
+									addMessage("<span class=\"peerMsg\">Peer:</span> " + JSON.stringify(data));
 								}
 							}
 							else
+							if(data.blob!=null)
 							{
-								addMessage("<span class=\"peerMsg\">Peer:</span> " + data);
-							}
-						}
-						else
-						{
-							addMessage("<span class=\"peerMsg\">Peer:</span> Got response that isn't a string");
-							
-							var blobArray = data.blob;
-							if(data.request.mime.startsWith('image'))
-							{
-								//var blob            = new Blob([data.blob], {type: 'image/jpg'});
-								var blob            = new Blob([blobArray], {type: data.request.mime});
-								//var imageBlob = data.blob;
-								//var image = new Image();
-								/*
-								var loadingImage = loadImage(
-								  'https://example.org/image.png',
-								  function (img) {
-									document.body.appendChild(img)
-								  },
-								  { maxWidth: 600 }
-								)
-								*/
-								
-								//const bytes = new Uint8Array(data.file);
-								
-								/*
-								const sFileName = data.path.replaceAll('/','');	   // The file to save the data.
+								var blobArray = data.blob;
+								if(data.request.mime.startsWith('image'))
+								{
+									//var blob            = new Blob([data.blob], {type: 'image/jpg'});
+									var blob            = new Blob([blobArray], {type: data.request.mime});
+									//var imageBlob = data.blob;
+									//var image = new Image();
+									/*
+									var loadingImage = loadImage(
+									  'https://example.org/image.png',
+									  function (img) {
+										document.body.appendChild(img)
+									  },
+									  { maxWidth: 600 }
+									)
+									*/
+									
+									//const bytes = new Uint8Array(data.file);
+									
+									/*
+									const sFileName = data.path.replaceAll('/','');	   // The file to save the data.
 
-								let newLink = document.createElement("a");
-								newLink.download = sFileName;
+									let newLink = document.createElement("a");
+									newLink.download = sFileName;
 
-								if (window.webkitURL != null) {
-									newLink.href = window.webkitURL.createObjectURL(blob);
+									if (window.webkitURL != null) {
+										newLink.href = window.webkitURL.createObjectURL(blob);
+									}
+									else {
+										newLink.href = window.URL.createObjectURL(blob);
+									}
+
+									newLink.style.display = "none";
+									document.body.appendChild(newLink);
+									newLink.click(); 
+									document.body.removeChild(newLink);
+									*/
+									
+									testImage.src = URL.createObjectURL(blob);
 								}
-								else {
-									newLink.href = window.URL.createObjectURL(blob);
-								}
-
-								newLink.style.display = "none";
-								document.body.appendChild(newLink);
-								newLink.click(); 
-								document.body.removeChild(newLink);
-								*/
-								
-								testImage.src = URL.createObjectURL(blob);
-							}
-							//delete data.blob;
-							testImageDiv.innerHTML = "<pre>"+JSON.stringify(data,null,2)+"</pre>";
-							
+								//delete data.blob;
+								testImageDiv.innerHTML = "<pre>"+JSON.stringify(data,null,2)+"</pre>";
+							}							
 						}
                     });
 					/*
@@ -452,7 +847,8 @@
 							{
 								msgJSON.url += utf8_to_b64(sendPath.value);
 							}
-							msg = JSON.stringify(msgJSON);
+							//msg = JSON.stringify(msgJSON);
+							msg = msgJSON;
 						}
                         //sendMessageBox.value = '{"url":"/"}';
 						//sendPostData.value = '{"path":"/"}';
