@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slide Presentation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Calibri, Arial, sans-serif;
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        .slide-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            overflow: hidden;
+            max-width: 1280px;
+            width: 100%;
+        }
+        
+        .slide {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        .controls {
+            padding: 20px;
+            text-align: center;
+            background: white;
+            border-top: 1px solid #eee;
+        }
+        
+        button {
+            background: #5B9BD5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 0 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        button:hover {
+            background: #4A8BC2;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .slide-info {
+            color: #666;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .slide-container { border-radius: 4px; }
+        }
+        
+        /* Print styles */
+        @media print {
+            body { background: white; padding: 0; }
+            .controls { display: none; }
+            .slide-container { box-shadow: none; border-radius: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="slide">
+            <?xml version="1.0" encoding="UTF-8"?>
+<svg width="1280" height="720" 
+     xmlns="http://www.w3.org/2000/svg" 
+     xmlns:xhtml="http://www.w3.org/1999/xhtml">
+     
+  <!-- Background -->
+  <rect width="1280" height="720" fill="#FF0000"/>
+  
+  <!-- Named Elements -->
+  <foreignObject x="440" y="260" width="400" height="200">
+    <div xmlns="http://www.w3.org/1999/xhtml" 
+         id="element-centerBox"
+         data-element-name="centerBox"
+         style="width: 400px; height: 200px; padding: 20px; font-family: Calibri, Arial, sans-serif; font-size: 24px; color: #333333; text-align: center; line-height: 1.4; background-color: #FFFFFF; border: 1px solid #CCCCCC; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; justify-content: center; align-items: center; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1)">
+      <h2><div style="text-align: center;">
+                <h2 style="margin: 0 0 10px 0; color: #1F497D;">Welcome!</h2>
+                <p style="margin: 0; font-size: 18px; color: #666;">
+                    This is <strong>HTML content</strong> rendered inside an SVG.<br/>
+                    It supports <em>formatting</em>, lists, and more!
+                </p>
+                <ul style="text-align: left; margin: 15px 0 0 0; font-size: 16px;">
+                    <li>Rich HTML formatting</li>
+                    <li>Proper text wrapping</li>
+                    <li>CSS styling</li>
+                </ul>
+            </div></h2>
+    </div>
+  </foreignObject>
+  
+</svg>
+        </div>
+        
+        <div class="controls">
+            <div class="slide-info">
+                Slide 1 of 1 • Rich HTML Content Preserved
+            </div>
+            
+            <button onclick="window.print()">Print</button>
+            <button onclick="exportSVG()">Export SVG</button>
+            <button onclick="copyToClipboard()">Copy SVG</button>
+            <button onclick="toggleFullscreen()">Fullscreen</button>
+            
+            <div style="margin-top: 15px; font-size: 12px; color: #999;">
+                💡 This HTML version preserves all rich formatting from foreign objects.<br>
+                View in browser for best quality, or print/export as needed.
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function exportSVG() {
+            const svgElement = document.querySelector('svg');
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            
+            const blob = new Blob([svgData], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'slide_rich.svg';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            URL.revokeObjectURL(url);
+        }
+        
+        function copyToClipboard() {
+            const svgElement = document.querySelector('svg');
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            
+            navigator.clipboard.writeText(svgData).then(() => {
+                alert('SVG copied to clipboard!');
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = svgData;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('SVG copied to clipboard!');
+            });
+        }
+        
+        function toggleFullscreen() {
+            const slideContainer = document.querySelector('.slide-container');
+            
+            if (!document.fullscreenElement) {
+                slideContainer.requestFullscreen().then(() => {
+                    slideContainer.style.maxWidth = '100vw';
+                    slideContainer.style.height = '100vh';
+                    slideContainer.style.borderRadius = '0';
+                }).catch(err => {
+                    console.error('Error entering fullscreen:', err);
+                });
+            } else {
+                document.exitFullscreen().then(() => {
+                    slideContainer.style.maxWidth = '1280px';
+                    slideContainer.style.height = 'auto';
+                    slideContainer.style.borderRadius = '8px';
+                });
+            }
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            switch(e.key) {
+                case 'F11':
+                    e.preventDefault();
+                    toggleFullscreen();
+                    break;
+                case 'p':
+                case 'P':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        window.print();
+                    }
+                    break;
+            }
+        });
+        
+        // Auto-scale SVG to fit container
+        function scaleSVG() {
+            const svg = document.querySelector('svg');
+            const container = document.querySelector('.slide');
+            
+            if (svg && container) {
+                const containerWidth = container.clientWidth;
+                const svgWidth = parseInt(svg.getAttribute('width') || '1280');
+                const scale = containerWidth / svgWidth;
+                
+                if (scale < 1) {
+                    svg.style.transform = `scale(${scale})`;
+                    svg.style.transformOrigin = 'top left';
+                    container.style.height = `${parseInt(svg.getAttribute('height') || '720') * scale}px`;
+                }
+            }
+        }
+        
+        // Scale on load and resize
+        window.addEventListener('load', scaleSVG);
+        window.addEventListener('resize', scaleSVG);
+    </script>
+</body>
+</html>
