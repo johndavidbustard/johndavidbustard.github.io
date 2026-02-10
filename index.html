@@ -1,1 +1,864 @@
-Hello World
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Offline Sprite + Tile Extractor</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #111827;
+      --panel: #1f2937;
+      --text: #f3f4f6;
+      --muted: #94a3b8;
+      --accent: #22c55e;
+      --danger: #ef4444;
+      --border: #334155;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      background: #0b1220;
+      align-items: center;
+    }
+    button, input, select, textarea {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      font: inherit;
+    }
+    button { cursor: pointer; }
+    button:hover { border-color: #64748b; }
+    button.active { border-color: var(--accent); color: #dcfce7; }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr 320px;
+      min-height: 0;
+    }
+    .panel {
+      border-right: 1px solid var(--border);
+      min-height: 0;
+      overflow: auto;
+      background: var(--panel);
+      padding: 10px;
+    }
+    .panel.right {
+      border-right: 0;
+      border-left: 1px solid var(--border);
+    }
+    .panel h3 {
+      margin: 8px 0;
+      font-size: 14px;
+      color: #e2e8f0;
+    }
+    .small { font-size: 12px; color: var(--muted); }
+    .asset-item {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+    }
+    .asset-item.active { border-color: var(--accent); }
+    .stage {
+      position: relative;
+      overflow: auto;
+      background: repeating-conic-gradient(#1e293b 0% 25%, #0f172a 0% 50%) 50% / 20px 20px;
+    }
+    .stage-inner { position: relative; display: inline-block; margin: 16px; }
+    canvas { image-rendering: pixelated; display: block; }
+    svg { position: absolute; inset: 0; pointer-events: auto; }
+    .overlay-rect { fill: rgba(34, 197, 94, 0.12); stroke: #22c55e; stroke-width: 1.5; }
+    .overlay-rect.selected { stroke: #60a5fa; fill: rgba(96, 165, 250, 0.12); }
+    .roi-rect { fill: rgba(250, 204, 21, 0.1); stroke: #facc15; stroke-width: 2; }
+    .handle { fill: #60a5fa; stroke: #0f172a; stroke-width: 1; cursor: nwse-resize; }
+    .stack { display: grid; gap: 8px; margin-bottom: 12px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .tile-preview {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+      gap: 6px;
+      max-height: 220px;
+      overflow: auto;
+    }
+    .tile-preview canvas {
+      border: 1px solid var(--border);
+      width: 52px;
+      height: 52px;
+      background: #000;
+    }
+    .dropzone {
+      border: 1px dashed #475569;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .tag { background: #1e3a8a; padding: 2px 6px; border-radius: 999px; font-size: 11px; }
+    .status { color: #cbd5e1; font-size: 12px; min-width: 220px; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <input id="fileInput" type="file" accept="image/png" multiple>
+    <button id="modeSprite" class="active">Sprite Mode</button>
+    <button id="modeTile">Tile Mode</button>
+    <button id="toolSelect" class="active">Select</button>
+    <button id="toolDraw">Draw Rect</button>
+    <button id="toolRoi">ROI Crop</button>
+    <button id="saveProject">Save Project JSON</button>
+    <button id="loadProjectBtn">Load Project JSON</button>
+    <input id="loadProjectInput" type="file" accept="application/json" hidden>
+    <span class="status" id="statusText">Drop PNG files to begin.</span>
+  </div>
+
+  <div class="layout">
+    <aside class="panel">
+      <h3>Assets</h3>
+      <div class="dropzone" id="dropzone">Drop PNGs here</div>
+      <div id="assetList"></div>
+      <h3>Sprite Outputs</h3>
+      <div class="stack">
+        <button id="detectSprites">Auto Detect Sprites</button>
+        <button id="clearRects">Clear Rectangles</button>
+        <button id="exportSelectedSprites">Export Selected Sprite PNG</button>
+        <button id="exportAllSprites">Export All Sprite PNGs</button>
+      </div>
+      <h3>Tile Outputs</h3>
+      <div class="stack">
+        <button id="suggestTileSize">Suggest Tile Size</button>
+        <button id="extractTiles">Extract Tiles</button>
+        <button id="exportTiles">Export Unique Tile PNGs</button>
+        <button id="exportTilemapJson">Export Tilemap JSON</button>
+      </div>
+    </aside>
+
+    <main class="stage" id="stage">
+      <div class="stage-inner" id="stageInner">
+        <canvas id="imageCanvas"></canvas>
+        <svg id="overlay"></svg>
+      </div>
+    </main>
+
+    <aside class="panel right">
+      <h3>Source & Credits</h3>
+      <div class="stack">
+        <input id="metaGame" placeholder="Game title">
+        <input id="metaSheet" placeholder="Sheet/map name">
+        <input id="metaSite" placeholder="Source site/url">
+        <textarea id="metaCredits" rows="2" placeholder="Credits (comma-separated)"></textarea>
+      </div>
+
+      <h3>Sprite Detection</h3>
+      <div class="stack">
+        <label>Background color: <input id="bgColor" type="color" value="#00b050"></label>
+        <label>Tolerance: <input id="tolerance" type="range" min="0" max="90" value="20"> <span id="tolValue" class="tag">20</span></label>
+        <label>Min area: <input id="minArea" type="number" min="1" value="18"></label>
+        <label>Merge padding: <input id="mergePadding" type="number" min="0" value="2"></label>
+        <button id="pickBgColor">Pick BG from image</button>
+      </div>
+
+      <h3>Tile Settings</h3>
+      <div class="grid2">
+        <label>tileW <input id="tileW" type="number" value="16" min="1"></label>
+        <label>tileH <input id="tileH" type="number" value="16" min="1"></label>
+      </div>
+      <p class="small" id="tileSummary">No tile extraction yet.</p>
+      <div id="tilePreview" class="tile-preview"></div>
+
+      <h3>Selection</h3>
+      <div class="stack">
+        <input id="rectName" placeholder="Name">
+        <input id="rectTags" placeholder="tags,comma,separated">
+        <label>Pivot X,Y <input id="pivot" placeholder="12,28"></label>
+        <button id="applySelectionMeta">Apply Metadata</button>
+      </div>
+      <p class="small" id="selectionText">No selection.</p>
+    </aside>
+  </div>
+
+<script>
+(() => {
+  const state = {
+    mode: 'sprite',
+    tool: 'select',
+    assets: [],
+    activeAssetId: null,
+    selectedRectId: null,
+    drag: null,
+    bgPickArmed: false,
+    tileset: null,
+  };
+
+  const el = {
+    fileInput: document.getElementById('fileInput'),
+    dropzone: document.getElementById('dropzone'),
+    assetList: document.getElementById('assetList'),
+    canvas: document.getElementById('imageCanvas'),
+    overlay: document.getElementById('overlay'),
+    stageInner: document.getElementById('stageInner'),
+    status: document.getElementById('statusText'),
+    selectionText: document.getElementById('selectionText'),
+    modeSprite: document.getElementById('modeSprite'),
+    modeTile: document.getElementById('modeTile'),
+    toolSelect: document.getElementById('toolSelect'),
+    toolDraw: document.getElementById('toolDraw'),
+    toolRoi: document.getElementById('toolRoi'),
+    detectSprites: document.getElementById('detectSprites'),
+    clearRects: document.getElementById('clearRects'),
+    exportSelectedSprites: document.getElementById('exportSelectedSprites'),
+    exportAllSprites: document.getElementById('exportAllSprites'),
+    suggestTileSize: document.getElementById('suggestTileSize'),
+    extractTiles: document.getElementById('extractTiles'),
+    exportTiles: document.getElementById('exportTiles'),
+    exportTilemapJson: document.getElementById('exportTilemapJson'),
+    bgColor: document.getElementById('bgColor'),
+    tolerance: document.getElementById('tolerance'),
+    tolValue: document.getElementById('tolValue'),
+    minArea: document.getElementById('minArea'),
+    mergePadding: document.getElementById('mergePadding'),
+    pickBgColor: document.getElementById('pickBgColor'),
+    tileW: document.getElementById('tileW'),
+    tileH: document.getElementById('tileH'),
+    tileSummary: document.getElementById('tileSummary'),
+    tilePreview: document.getElementById('tilePreview'),
+    rectName: document.getElementById('rectName'),
+    rectTags: document.getElementById('rectTags'),
+    pivot: document.getElementById('pivot'),
+    applySelectionMeta: document.getElementById('applySelectionMeta'),
+    saveProject: document.getElementById('saveProject'),
+    loadProjectBtn: document.getElementById('loadProjectBtn'),
+    loadProjectInput: document.getElementById('loadProjectInput'),
+    metaGame: document.getElementById('metaGame'),
+    metaSheet: document.getElementById('metaSheet'),
+    metaSite: document.getElementById('metaSite'),
+    metaCredits: document.getElementById('metaCredits'),
+  };
+
+  const ctx = el.canvas.getContext('2d', { willReadFrequently: true });
+
+  function setStatus(msg) { el.status.textContent = msg; }
+  function activeAsset() { return state.assets.find(a => a.id === state.activeAssetId) || null; }
+
+  function uid(prefix) { return `${prefix}_${Math.random().toString(36).slice(2, 8)}`; }
+
+  async function loadFiles(files) {
+    for (const file of files) {
+      if (!file.type.includes('png')) continue;
+      const bmp = await createImageBitmap(file);
+      state.assets.push({
+        id: uid('img'),
+        fileName: file.name,
+        width: bmp.width,
+        height: bmp.height,
+        bitmap: bmp,
+        rects: [],
+        roi: null,
+      });
+    }
+    if (!state.activeAssetId && state.assets.length) state.activeAssetId = state.assets[0].id;
+    renderAssetList();
+    drawActiveImage();
+    setStatus(`Loaded ${files.length} file(s).`);
+  }
+
+  function renderAssetList() {
+    el.assetList.innerHTML = '';
+    state.assets.forEach(asset => {
+      const div = document.createElement('div');
+      div.className = `asset-item ${asset.id === state.activeAssetId ? 'active' : ''}`;
+      div.innerHTML = `<strong>${asset.fileName}</strong><div class="small">${asset.width}x${asset.height} • ${asset.rects.length} rects</div>`;
+      div.onclick = () => { state.activeAssetId = asset.id; state.selectedRectId = null; drawActiveImage(); renderAssetList(); };
+      el.assetList.appendChild(div);
+    });
+  }
+
+  function drawActiveImage() {
+    const asset = activeAsset();
+    if (!asset) return;
+    el.canvas.width = asset.width;
+    el.canvas.height = asset.height;
+    el.overlay.setAttribute('viewBox', `0 0 ${asset.width} ${asset.height}`);
+    el.overlay.setAttribute('width', asset.width);
+    el.overlay.setAttribute('height', asset.height);
+    ctx.clearRect(0, 0, asset.width, asset.height);
+    ctx.drawImage(asset.bitmap, 0, 0);
+    renderOverlay();
+  }
+
+  function renderOverlay() {
+    const asset = activeAsset();
+    if (!asset) return;
+    el.overlay.innerHTML = '';
+
+    if (asset.roi) {
+      const r = makeSvgRect(asset.roi.x, asset.roi.y, asset.roi.w, asset.roi.h, 'roi-rect');
+      el.overlay.appendChild(r);
+    }
+
+    asset.rects.forEach(rect => {
+      const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      g.dataset.id = rect.id;
+      const body = makeSvgRect(rect.x, rect.y, rect.w, rect.h, `overlay-rect ${rect.id === state.selectedRectId ? 'selected' : ''}`);
+      body.dataset.role = 'body';
+      g.appendChild(body);
+
+      if (rect.id === state.selectedRectId) {
+        for (const h of handleRects(rect)) {
+          const k = makeSvgRect(h.x - 2, h.y - 2, 4, 4, 'handle');
+          k.dataset.role = 'handle';
+          k.dataset.handle = h.name;
+          g.appendChild(k);
+        }
+      }
+
+      el.overlay.appendChild(g);
+    });
+
+    updateSelectionInspector();
+  }
+
+  function handleRects(r) {
+    return [
+      { name: 'nw', x: r.x, y: r.y },
+      { name: 'ne', x: r.x + r.w, y: r.y },
+      { name: 'sw', x: r.x, y: r.y + r.h },
+      { name: 'se', x: r.x + r.w, y: r.y + r.h },
+    ];
+  }
+
+  function makeSvgRect(x, y, w, h, className) {
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', w);
+    rect.setAttribute('height', h);
+    rect.setAttribute('class', className);
+    return rect;
+  }
+
+  function screenToSvg(evt) {
+    const pt = el.overlay.createSVGPoint();
+    pt.x = evt.clientX;
+    pt.y = evt.clientY;
+    return pt.matrixTransform(el.overlay.getScreenCTM().inverse());
+  }
+
+  function clampRect(rect, maxW, maxH) {
+    rect.w = Math.max(1, rect.w);
+    rect.h = Math.max(1, rect.h);
+    rect.x = Math.max(0, Math.min(rect.x, maxW - rect.w));
+    rect.y = Math.max(0, Math.min(rect.y, maxH - rect.h));
+    return rect;
+  }
+
+  el.overlay.addEventListener('mousedown', (evt) => {
+    const asset = activeAsset();
+    if (!asset) return;
+    const p = screenToSvg(evt);
+
+    if (state.bgPickArmed) {
+      const pixel = ctx.getImageData(Math.floor(p.x), Math.floor(p.y), 1, 1).data;
+      const hex = `#${[pixel[0], pixel[1], pixel[2]].map(v => v.toString(16).padStart(2, '0')).join('')}`;
+      el.bgColor.value = hex;
+      state.bgPickArmed = false;
+      setStatus(`Background color picked: ${hex}`);
+      return;
+    }
+
+    const target = evt.target;
+    const g = target.closest('g[data-id]');
+    if (state.tool === 'draw' || (state.tool === 'roi' && state.mode === 'tile')) {
+      state.drag = { type: state.tool === 'roi' ? 'drawRoi' : 'drawRect', startX: p.x, startY: p.y };
+      if (state.tool === 'roi') asset.roi = { x: p.x, y: p.y, w: 1, h: 1 };
+      else {
+        const rect = { id: uid('spr'), x: p.x, y: p.y, w: 1, h: 1, name: '', tags: [], pivot: null };
+        asset.rects.push(rect);
+        state.selectedRectId = rect.id;
+      }
+      renderOverlay();
+      return;
+    }
+
+    if (g) {
+      const id = g.dataset.id;
+      state.selectedRectId = id;
+      const rect = asset.rects.find(r => r.id === id);
+      if (target.dataset.role === 'handle') {
+        state.drag = { type: 'resize', handle: target.dataset.handle, startX: p.x, startY: p.y, base: { ...rect } };
+      } else {
+        state.drag = { type: 'move', startX: p.x, startY: p.y, base: { ...rect } };
+      }
+      renderOverlay();
+      return;
+    }
+
+    state.selectedRectId = null;
+    renderOverlay();
+  });
+
+  el.overlay.addEventListener('mousemove', (evt) => {
+    const asset = activeAsset();
+    if (!asset || !state.drag) return;
+    const p = screenToSvg(evt);
+    const d = state.drag;
+
+    if (d.type === 'drawRect') {
+      const rect = asset.rects.find(r => r.id === state.selectedRectId);
+      rect.x = Math.min(d.startX, p.x);
+      rect.y = Math.min(d.startY, p.y);
+      rect.w = Math.abs(p.x - d.startX);
+      rect.h = Math.abs(p.y - d.startY);
+    } else if (d.type === 'drawRoi') {
+      asset.roi = { x: Math.min(d.startX, p.x), y: Math.min(d.startY, p.y), w: Math.abs(p.x - d.startX), h: Math.abs(p.y - d.startY) };
+    } else {
+      const rect = asset.rects.find(r => r.id === state.selectedRectId);
+      if (!rect) return;
+      if (d.type === 'move') {
+        rect.x = d.base.x + (p.x - d.startX);
+        rect.y = d.base.y + (p.y - d.startY);
+      } else if (d.type === 'resize') {
+        let { x, y, w, h } = d.base;
+        const dx = p.x - d.startX;
+        const dy = p.y - d.startY;
+        if (d.handle.includes('e')) w = d.base.w + dx;
+        if (d.handle.includes('s')) h = d.base.h + dy;
+        if (d.handle.includes('w')) { x = d.base.x + dx; w = d.base.w - dx; }
+        if (d.handle.includes('n')) { y = d.base.y + dy; h = d.base.h - dy; }
+        if (w < 1) { x += w; w = Math.abs(w); }
+        if (h < 1) { y += h; h = Math.abs(h); }
+        rect.x = x; rect.y = y; rect.w = w; rect.h = h;
+      }
+      clampRect(rect, asset.width, asset.height);
+    }
+    renderOverlay();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (state.drag) {
+      state.drag = null;
+      renderAssetList();
+      renderOverlay();
+    }
+  });
+
+  function parseHexColor(hex) {
+    const raw = hex.replace('#', '');
+    return [parseInt(raw.slice(0, 2), 16), parseInt(raw.slice(2, 4), 16), parseInt(raw.slice(4, 6), 16)];
+  }
+
+  function buildForegroundMask(asset) {
+    const [br, bg, bb] = parseHexColor(el.bgColor.value);
+    const tolerance = Number(el.tolerance.value);
+    const image = ctx.getImageData(0, 0, asset.width, asset.height);
+    const mask = new Uint8Array(asset.width * asset.height);
+    for (let i = 0, p = 0; i < image.data.length; i += 4, p++) {
+      const r = image.data[i], g = image.data[i + 1], b = image.data[i + 2], a = image.data[i + 3];
+      const distance = Math.max(Math.abs(r - br), Math.abs(g - bg), Math.abs(b - bb));
+      mask[p] = a > 0 && distance > tolerance ? 1 : 0;
+    }
+    return mask;
+  }
+
+  function detectConnectedComponents(asset) {
+    drawActiveImage();
+    const w = asset.width, h = asset.height;
+    const mask = buildForegroundMask(asset);
+    const seen = new Uint8Array(mask.length);
+    const minArea = Number(el.minArea.value);
+    const dirs = [-1, 1, -w, w, -w - 1, -w + 1, w - 1, w + 1];
+    const rects = [];
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const start = y * w + x;
+        if (!mask[start] || seen[start]) continue;
+        const stack = [start];
+        seen[start] = 1;
+        let minX = x, maxX = x, minY = y, maxY = y, area = 0;
+
+        while (stack.length) {
+          const cur = stack.pop();
+          const cx = cur % w;
+          const cy = Math.floor(cur / w);
+          area++;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          for (const d of dirs) {
+            const n = cur + d;
+            if (n < 0 || n >= mask.length || seen[n] || !mask[n]) continue;
+            const nx = n % w;
+            if (Math.abs(nx - cx) > 1) continue;
+            seen[n] = 1;
+            stack.push(n);
+          }
+        }
+
+        if (area >= minArea) rects.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, area });
+      }
+    }
+
+    const pad = Number(el.mergePadding.value);
+    return mergeNearbyRects(rects, pad).map(r => ({ id: uid('spr'), ...r, name: '', tags: [], pivot: null }));
+  }
+
+  function mergeNearbyRects(rects, pad) {
+    const out = [];
+    for (const rect of rects) {
+      let merged = false;
+      for (const target of out) {
+        const overlap = !(rect.x > target.x + target.w + pad || rect.x + rect.w + pad < target.x || rect.y > target.y + target.h + pad || rect.y + rect.h + pad < target.y);
+        if (overlap) {
+          const x1 = Math.min(target.x, rect.x);
+          const y1 = Math.min(target.y, rect.y);
+          const x2 = Math.max(target.x + target.w, rect.x + rect.w);
+          const y2 = Math.max(target.y + target.h, rect.y + rect.h);
+          target.x = x1; target.y = y1; target.w = x2 - x1; target.h = y2 - y1;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) out.push({ ...rect });
+    }
+    return out;
+  }
+
+  function downloadBlob(name, blob) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  async function exportRectAsPng(asset, rect, filename) {
+    const off = document.createElement('canvas');
+    off.width = Math.max(1, Math.round(rect.w));
+    off.height = Math.max(1, Math.round(rect.h));
+    const offCtx = off.getContext('2d');
+    offCtx.drawImage(asset.bitmap, Math.round(rect.x), Math.round(rect.y), off.width, off.height, 0, 0, off.width, off.height);
+
+    const img = offCtx.getImageData(0, 0, off.width, off.height);
+    const [br, bg, bb] = parseHexColor(el.bgColor.value);
+    const tolerance = Number(el.tolerance.value);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const dist = Math.max(Math.abs(img.data[i] - br), Math.abs(img.data[i + 1] - bg), Math.abs(img.data[i + 2] - bb));
+      if (dist <= tolerance) img.data[i + 3] = 0;
+    }
+    offCtx.putImageData(img, 0, 0);
+
+    const blob = await new Promise(r => off.toBlob(r, 'image/png'));
+    downloadBlob(filename, blob);
+  }
+
+  function fnv1a(bytes) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+      h ^= bytes[i];
+      h = Math.imul(h, 0x01000193);
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  function extractTileData() {
+    const asset = activeAsset();
+    if (!asset) return;
+    drawActiveImage();
+    const tileW = Number(el.tileW.value);
+    const tileH = Number(el.tileH.value);
+    const roi = asset.roi || { x: 0, y: 0, w: asset.width, h: asset.height };
+    const cols = Math.floor(roi.w / tileW);
+    const rows = Math.floor(roi.h / tileH);
+
+    const unique = [];
+    const map = [];
+    const buckets = new Map();
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = Math.floor(roi.x + c * tileW);
+        const y = Math.floor(roi.y + r * tileH);
+        const tile = ctx.getImageData(x, y, tileW, tileH).data;
+        const hash = fnv1a(tile);
+
+        let tileId = null;
+        const ids = buckets.get(hash) || [];
+        for (const idx of ids) {
+          const other = unique[idx];
+          if (other.bytes.length !== tile.length) continue;
+          let equal = true;
+          for (let i = 0; i < tile.length; i++) {
+            if (tile[i] !== other.bytes[i]) { equal = false; break; }
+          }
+          if (equal) { tileId = other.id; break; }
+        }
+
+        if (!tileId) {
+          const id = `t_${String(unique.length + 1).padStart(4, '0')}`;
+          unique.push({ id, bytes: new Uint8ClampedArray(tile), w: tileW, h: tileH, name: '', tags: [], collision: 'none' });
+          const idx = unique.length - 1;
+          buckets.set(hash, [...(buckets.get(hash) || []), idx]);
+          tileId = id;
+        }
+
+        map.push({ tileId, flipH: false, flipV: false, rot: 0 });
+      }
+    }
+
+    state.tileset = { roi, tileW, tileH, cols, rows, tiles: unique, cells: map };
+    renderTilePreview();
+    el.tileSummary.textContent = `Grid ${cols}x${rows} = ${cols * rows} cells, ${unique.length} unique tiles.`;
+    setStatus('Tile extraction complete.');
+  }
+
+  function renderTilePreview() {
+    el.tilePreview.innerHTML = '';
+    if (!state.tileset) return;
+    const limit = Math.min(state.tileset.tiles.length, 120);
+    for (let i = 0; i < limit; i++) {
+      const t = state.tileset.tiles[i];
+      const c = document.createElement('canvas');
+      c.width = t.w; c.height = t.h;
+      const cx = c.getContext('2d');
+      cx.putImageData(new ImageData(t.bytes, t.w, t.h), 0, 0);
+      el.tilePreview.appendChild(c);
+    }
+  }
+
+  function suggestTileSize() {
+    const asset = activeAsset();
+    if (!asset) return;
+    const roi = asset.roi || { x: 0, y: 0, w: asset.width, h: asset.height };
+    drawActiveImage();
+    const candidates = [8, 12, 16, 24, 32];
+    let best = { score: -Infinity, size: 16 };
+
+    for (const s of candidates) {
+      const cols = Math.floor(roi.w / s);
+      const rows = Math.floor(roi.h / s);
+      if (!cols || !rows) continue;
+      const seen = new Set();
+      let total = 0;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const data = ctx.getImageData(Math.floor(roi.x + x * s), Math.floor(roi.y + y * s), s, s).data;
+          seen.add(fnv1a(data));
+          total++;
+        }
+      }
+      const unique = seen.size;
+      const score = total / Math.max(1, unique) - unique / total;
+      if (score > best.score) best = { score, size: s };
+    }
+
+    el.tileW.value = best.size;
+    el.tileH.value = best.size;
+    setStatus(`Suggested tile size: ${best.size}`);
+  }
+
+  function updateSelectionInspector() {
+    const asset = activeAsset();
+    const rect = asset?.rects.find(r => r.id === state.selectedRectId);
+    if (!rect) {
+      el.selectionText.textContent = 'No selection.';
+      return;
+    }
+    el.selectionText.textContent = `Rect: x${Math.round(rect.x)} y${Math.round(rect.y)} w${Math.round(rect.w)} h${Math.round(rect.h)}`;
+    el.rectName.value = rect.name || '';
+    el.rectTags.value = (rect.tags || []).join(',');
+    el.pivot.value = rect.pivot ? `${rect.pivot.x},${rect.pivot.y}` : '';
+  }
+
+  function exportProject() {
+    const project = {
+      version: 1,
+      source: {
+        site: el.metaSite.value,
+        game: el.metaGame.value,
+        sheetName: el.metaSheet.value,
+        credits: el.metaCredits.value.split(',').map(v => v.trim()).filter(Boolean),
+        notes: 'Exported from offline extractor',
+      },
+      images: state.assets.map(a => ({ id: a.id, originalFileName: a.fileName, width: a.width, height: a.height })),
+      sprites: state.assets.flatMap(a => a.rects.map(r => ({
+        id: r.id,
+        imageId: a.id,
+        rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) },
+        name: r.name || '',
+        tags: r.tags || [],
+        pivot: r.pivot || null,
+      }))),
+      tilesets: state.tileset ? [{
+        id: 'ts_1', tileW: state.tileset.tileW, tileH: state.tileset.tileH,
+        tiles: state.tileset.tiles.map(t => ({ id: t.id, name: t.name || '', tags: t.tags || [], collision: t.collision || 'none' })),
+      }] : [],
+      tilemaps: state.tileset ? [{
+        id: 'tm_1', tilesetId: 'ts_1', width: state.tileset.cols, height: state.tileset.rows, cells: state.tileset.cells,
+      }] : []
+    };
+    downloadBlob('project.json', new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }));
+  }
+
+  function importProject(text) {
+    const data = JSON.parse(text);
+    el.metaSite.value = data.source?.site || '';
+    el.metaGame.value = data.source?.game || '';
+    el.metaSheet.value = data.source?.sheetName || '';
+    el.metaCredits.value = (data.source?.credits || []).join(', ');
+
+    const byImage = new Map();
+    for (const s of data.sprites || []) {
+      const arr = byImage.get(s.imageId) || [];
+      arr.push({
+        id: s.id,
+        x: s.rect.x,
+        y: s.rect.y,
+        w: s.rect.w,
+        h: s.rect.h,
+        name: s.name || '',
+        tags: s.tags || [],
+        pivot: s.pivot || null,
+      });
+      byImage.set(s.imageId, arr);
+    }
+
+    state.assets.forEach(asset => { asset.rects = byImage.get(asset.id) || []; });
+    renderAssetList();
+    renderOverlay();
+    setStatus('Loaded metadata from project JSON.');
+  }
+
+  function wireEvents() {
+    el.fileInput.addEventListener('change', e => loadFiles([...e.target.files]));
+    ['dragenter', 'dragover'].forEach(type => el.dropzone.addEventListener(type, e => { e.preventDefault(); }));
+    el.dropzone.addEventListener('drop', e => { e.preventDefault(); loadFiles([...e.dataTransfer.files]); });
+
+    el.modeSprite.onclick = () => { state.mode = 'sprite'; el.modeSprite.classList.add('active'); el.modeTile.classList.remove('active'); setStatus('Sprite mode'); };
+    el.modeTile.onclick = () => { state.mode = 'tile'; el.modeTile.classList.add('active'); el.modeSprite.classList.remove('active'); setStatus('Tile mode'); };
+    el.toolSelect.onclick = () => setTool('select');
+    el.toolDraw.onclick = () => setTool('draw');
+    el.toolRoi.onclick = () => setTool('roi');
+
+    el.tolerance.oninput = () => { el.tolValue.textContent = el.tolerance.value; };
+
+    el.detectSprites.onclick = () => {
+      const asset = activeAsset();
+      if (!asset) return;
+      asset.rects = detectConnectedComponents(asset);
+      state.selectedRectId = asset.rects[0]?.id || null;
+      renderAssetList();
+      renderOverlay();
+      setStatus(`Detected ${asset.rects.length} sprite regions.`);
+    };
+
+    el.clearRects.onclick = () => {
+      const asset = activeAsset();
+      if (!asset) return;
+      asset.rects = [];
+      state.selectedRectId = null;
+      renderAssetList();
+      renderOverlay();
+      setStatus('Cleared rectangles.');
+    };
+
+    el.pickBgColor.onclick = () => {
+      state.bgPickArmed = true;
+      setStatus('Click image to pick background color...');
+    };
+
+    el.exportSelectedSprites.onclick = async () => {
+      const asset = activeAsset();
+      const rect = asset?.rects.find(r => r.id === state.selectedRectId);
+      if (!asset || !rect) return;
+      await exportRectAsPng(asset, rect, `${rect.name || rect.id}.png`);
+    };
+
+    el.exportAllSprites.onclick = async () => {
+      const asset = activeAsset();
+      if (!asset) return;
+      for (const rect of asset.rects) {
+        await exportRectAsPng(asset, rect, `${rect.name || rect.id}.png`);
+      }
+      setStatus(`Exported ${asset.rects.length} sprites.`);
+    };
+
+    el.suggestTileSize.onclick = suggestTileSize;
+    el.extractTiles.onclick = extractTileData;
+
+    el.exportTiles.onclick = async () => {
+      if (!state.tileset) return;
+      for (const t of state.tileset.tiles) {
+        const c = document.createElement('canvas');
+        c.width = t.w; c.height = t.h;
+        c.getContext('2d').putImageData(new ImageData(t.bytes, t.w, t.h), 0, 0);
+        const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+        downloadBlob(`${t.id}.png`, blob);
+      }
+      setStatus(`Exported ${state.tileset.tiles.length} unique tiles.`);
+    };
+
+    el.exportTilemapJson.onclick = () => {
+      if (!state.tileset) return;
+      const payload = {
+        id: 'tm_1',
+        tilesetId: 'ts_1',
+        width: state.tileset.cols,
+        height: state.tileset.rows,
+        tileW: state.tileset.tileW,
+        tileH: state.tileset.tileH,
+        cells: state.tileset.cells,
+      };
+      downloadBlob('tilemap.json', new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    };
+
+    el.applySelectionMeta.onclick = () => {
+      const asset = activeAsset();
+      const rect = asset?.rects.find(r => r.id === state.selectedRectId);
+      if (!rect) return;
+      rect.name = el.rectName.value.trim();
+      rect.tags = el.rectTags.value.split(',').map(v => v.trim()).filter(Boolean);
+      const [px, py] = el.pivot.value.split(',').map(Number);
+      rect.pivot = Number.isFinite(px) && Number.isFinite(py) ? { x: px, y: py } : null;
+      setStatus('Selection metadata updated.');
+      renderAssetList();
+    };
+
+    el.saveProject.onclick = exportProject;
+    el.loadProjectBtn.onclick = () => el.loadProjectInput.click();
+    el.loadProjectInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      importProject(await file.text());
+    };
+  }
+
+  function setTool(tool) {
+    state.tool = tool;
+    el.toolSelect.classList.toggle('active', tool === 'select');
+    el.toolDraw.classList.toggle('active', tool === 'draw');
+    el.toolRoi.classList.toggle('active', tool === 'roi');
+  }
+
+  wireEvents();
+})();
+</script>
+</body>
+</html>
